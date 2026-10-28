@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+*.lic
+*.pem
+*.key
+*.tif
+*.tiff
+*.partial
+*.pdf
