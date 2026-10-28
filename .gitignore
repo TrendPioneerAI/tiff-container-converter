@@ -25,4 +25,7 @@ payload.zip
 *.ntf
 *.vrt
 *.partial
+*.pending
+*.original-backup
+*.bigtiff-backup
 *.pdf
