@@ -1,14 +1,15 @@
 # TIFF 容器转换工具：历史版本
 
-这里保存三个历史版本的源码，适合在 Windows 10/11 64 位环境重新运行和打包。三个目录互相独立：
+这里保存历史版本和免授权双向转换新版的源码，适合在 Windows 10/11 64 位环境重新运行和打包。版本目录互相独立：
 
 | 目录 | 历史功能 |
 | --- | --- |
 | v1 | BigTIFF 转 Classic TIFF，单文件，JSON 验证报告 |
 | v2 | 批量转换、文件夹扫描、离线许可证 |
 | v3 | 批量转换、原位替换选项、每批一份 PDF 报告 |
+| v4 | 普通 TIFF 与 BigTIFF 双向转换、批处理、PDF 报告，无需许可证 |
 
-这是原始历史版本的整理快照；各自源码和功能保持原状。Classic TIFF → BigTIFF 的反向转换与免授权新版不在此历史快照内。
+V1—V3 是原始历史版本的整理快照；V4 在其基础上增量开发。
 
 ## 下载并运行
 
@@ -20,6 +21,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe v1\BigTIFF_to_ClassicTIFF.py
 .\.venv\Scripts\python.exe v2\bigtiff_to_classic.py
 .\.venv\Scripts\python.exe v3\bigtiff_to_classic.py
+.\.venv\Scripts\python.exe v4\app.py
 ```
 
 其中 V2 和 V3 是原始授权版，需要可验证的许可证。源码没有包含以前的私钥和客户许可证，历史许可证若要继续使用，须由使用者自行安全保存；若从源码建立新签发体系，见 [授权重建](docs/license-rebuild.md)。这些材料不能依靠公开仓库恢复原来的私钥。
@@ -34,11 +36,24 @@ PDF 报告依赖 Windows 的微软雅黑或黑体字体。应用程序输出路�
 ..\.venv\Scripts\python.exe -m PyInstaller --noconfirm --windowed --onedir --contents-directory runtime --name TIFFConverter BigTIFF_to_ClassicTIFF.py
 ```
 
-V2/V3 将最后的脚本名改为 `bigtiff_to_classic.py`。输出 `dist\TIFFConverter` 整个目录需一同分发；目标机器不需要另装 Python。
+V2/V3 将最后的脚本名改为 `bigtiff_to_classic.py`，V4 改为 `app.py`。输出 `dist\TIFFConverter` 整个目录需一同分发；目标机器不需要另装 Python。
+
+V4 的 Windows 安装程序在 GitHub Release 中下载。安装程序仅将程序文件放到选择的目录，不创建系统服务、开始菜单或卸载项；也可下载便携版 ZIP。
+
+在仓库根目录重建 V4 安装程序（依赖见上）：
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --windowed --onedir --contents-directory runtime --name TIFF_Converter_V4 v4\app.py
+.\.venv\Scripts\python.exe v4\build_payload.py dist\TIFF_Converter_V4 payload.zip
+$env:TIFF_INSTALLER_PAYLOAD = (Resolve-Path payload.zip).Path
+.\.venv\Scripts\python.exe -m PyInstaller --distpath setup-dist v4\installer.spec
+```
+
+构建脚本排除影像文件；生成的 `payload.zip` 和 `setup-dist` 不应提交到源码仓库。
 
 ## 测试与边界
 
-运行 `.\.venv\Scripts\python.exe tests\smoke.py` 会生成合成小样本，并对三个版本执行转换和字节级验证，不需要用户航摄影像。
+公开仓库不包含任何真实或模拟影像及内置影像样例。可在本地使用自行准备的文件运行转换，并用 `tests\compare_tiffs.py` 比较图像块、标签及可选的 Rasterio 像素抽样；不要把测试影像提交到仓库。
 
 历史版本直接复制受支持 TIFF 的图像块并验证非结构性标签；转换会重建文件头与偏移，不能保证整文件逐字节不变。受限指针结构或超出 Classic TIFF 可表达范围的输入应停止。V3 的原位替换是历史实现，网络盘、突然断电、权限及异常回滚等场景没有全面验证；生产影像建议先选择输出副本并保留独立备份。
 
