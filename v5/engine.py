@@ -14,8 +14,8 @@ import retile
 import classic_tile
 from batch_pdf_report import generate_batch_pdf
 
-APP_NAME = "TIFF 双向转换工具"
-APP_VERSION = "5.1.0"
+APP_NAME = "影像格式转换"
+APP_VERSION = "5.2.0"
 SUPPORTED_EXTENSIONS = base.SUPPORTED_EXTENSIONS
 ConversionError = base.ConversionError
 

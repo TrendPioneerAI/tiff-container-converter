@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import sys
 import threading
 from pathlib import Path
 from typing import Iterable
@@ -11,26 +12,55 @@ def run_gui_app(engine) -> int:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
-    BG = "#F7F7F8"
+    BG = "#F4F6F2"
     CARD = "#FFFFFF"
-    SIDEBAR = "#202123"
-    SIDEBAR_MUTED = "#AEB4BC"
-    TEXT = "#171717"
-    MUTED = "#6B7280"
-    BORDER = "#E5E7EB"
-    ACCENT = "#10A37F"
-    ACCENT_HOVER = "#0D8C6D"
+    SIDEBAR = "#173D37"
+    SIDEBAR_MUTED = "#B8CCC2"
+    TEXT = "#20352D"
+    MUTED = "#718178"
+    BORDER = "#DFE7DF"
+    ACCENT = "#246C56"
+    ACCENT_HOVER = "#185542"
     DANGER = "#B42318"
     WARNING_BG = "#FFF7ED"
 
     smoke_test = os.environ.get("BTFC_UI_SMOKE_TEST") == "1"
     root = tk.Tk()
+    dpi = 96
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            dpi = ctypes.windll.user32.GetDpiForWindow(root.winfo_id()) or 96
+        except (AttributeError, OSError):
+            pass
+    # Keep vector-rendered text sharp while fitting the interface on smaller screens.
+    native_scale = min(dpi / 96.0, 2.5)
+    dpi_scale = min(native_scale, (root.winfo_screenwidth() - 20) / 1120,
+                    (root.winfo_screenheight() - 100) / 780)
+    dpi_scale = max(0.75, dpi_scale)
+    root.tk.call("tk", "scaling", dpi_scale * 96.0 / 72.0)
     if smoke_test:
         root.withdraw()
     root.title(f"{engine.APP_NAME} v{engine.APP_VERSION}")
-    root.geometry("1120x780")
-    root.minsize(980, 680)
+    window_width = min(round(1120*native_scale), root.winfo_screenwidth() - 20)
+    window_height = min(round(780*native_scale), root.winfo_screenheight() - 70)
+    root.geometry(f"{window_width}x{window_height}")
+    root.minsize(min(round(980*dpi_scale), window_width), min(round(680*dpi_scale), window_height))
     root.configure(bg=BG)
+    branding = Path(sys.executable).resolve().parent / "branding" if getattr(sys, "frozen", False) else None
+    icon_path = branding / "app.ico" if branding else Path(os.environ.get("TIFF_UI_ICON", ""))
+    try:
+        if not icon_path.is_file():
+            raise FileNotFoundError("无可选图标")
+        root.iconbitmap(default=str(icon_path))
+    except (OSError, tk.TclError):
+        icon = tk.PhotoImage(width=32, height=32)
+        icon.put("#173D37", to=(0, 0, 32, 32))
+        icon.put("#A9D5BD", to=(6, 8, 26, 12))
+        icon.put("#78B89D", to=(8, 14, 24, 18))
+        icon.put("#E0EAD9", to=(10, 20, 22, 24))
+        root.iconphoto(True, icon)
+        root.brand_icon = icon
 
     style = ttk.Style(root)
     style.theme_use("clam")
@@ -61,6 +91,11 @@ def run_gui_app(engine) -> int:
         font=("Microsoft YaHei UI", 8),
     )
     style.map("Secondary.TButton", background=[("active", "#F2F4F7")])
+    style.configure("Mode.TRadiobutton", background="#F0F5F0", foreground=TEXT,
+                    font=("Microsoft YaHei UI", 9, "bold"), padding=(16, 10),
+                    relief="flat", indicatoron=False)
+    style.map("Mode.TRadiobutton", background=[("selected", "#D9EAE0"), ("active", "#E7F1E9"), ("disabled", "#F2F3F1")],
+              foreground=[("selected", "#185542"), ("disabled", "#A5AEA8")])
     style.configure(
         "Sidebar.TButton",
         background=SIDEBAR,
@@ -77,7 +112,7 @@ def run_gui_app(engine) -> int:
         background=CARD,
         fieldbackground=CARD,
         foreground=TEXT,
-        rowheight=30,
+        rowheight=round(30*dpi_scale),
         borderwidth=0,
         font=("Microsoft YaHei UI", 8),
     )
@@ -103,7 +138,8 @@ def run_gui_app(engine) -> int:
     output_var = tk.StringVar()
     file_count_var = tk.StringVar(value="0 个文件")
     status_var = tk.StringVar(value="添加普通 TIFF 文件或文件夹以开始")
-    direction_var = tk.StringVar(value="普通 TIFF → 256瓦片普通 TIFF")
+    direction_var = tk.StringVar(value="to_classic_tiled")
+    direction_hint_var = tk.StringVar(value="选择 YS 参考图，转换 TM 影像。")
     nodata_zero_var = tk.BooleanVar(value=True)
     reference_var = tk.StringVar()
     option_hint_var = tk.StringVar(value="转换结果保存到指定文件夹，源文件保持不变。")
@@ -113,7 +149,7 @@ def run_gui_app(engine) -> int:
     shell.columnconfigure(1, weight=1)
     shell.rowconfigure(0, weight=1)
 
-    sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=225)
+    sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=round(225*dpi_scale))
     sidebar.grid(row=0, column=0, sticky="nsew")
     sidebar.grid_propagate(False)
     sidebar.columnconfigure(0, weight=1)
@@ -121,16 +157,16 @@ def run_gui_app(engine) -> int:
 
     tk.Label(
         sidebar,
-        text="TIFF",
+        text="T",
         bg=ACCENT,
         fg="#FFFFFF",
         font=("Segoe UI", 13, "bold"),
-        width=5,
-        height=2,
-    ).grid(row=0, column=0, sticky="w", padx=22, pady=(24, 10))
+        width=3,
+        height=1,
+    ).grid(row=0, column=0, sticky="w", padx=22, pady=(24, 14))
     tk.Label(
         sidebar,
-        text="TIFF Converter",
+        text="影像格式转换",
         bg=SIDEBAR,
         fg="#FFFFFF",
         font=("Microsoft YaHei UI", 12, "bold"),
@@ -138,7 +174,7 @@ def run_gui_app(engine) -> int:
     ).grid(row=1, column=0, sticky="ew", padx=22)
     tk.Label(
         sidebar,
-        text=f"双向转换 · v{engine.APP_VERSION}",
+        text=f"TIFF  /  BIGTIFF    ·    {engine.APP_VERSION}",
         bg=SIDEBAR,
         fg=SIDEBAR_MUTED,
         font=("Microsoft YaHei UI", 8),
@@ -148,7 +184,7 @@ def run_gui_app(engine) -> int:
     tk.Label(
         sidebar,
         text="  转换任务",
-        bg="#343541",
+        bg="#285448",
         fg="#FFFFFF",
         font=("Microsoft YaHei UI", 9, "bold"),
         anchor="w",
@@ -157,7 +193,7 @@ def run_gui_app(engine) -> int:
     ).grid(row=3, column=0, sticky="ew", padx=12)
     tk.Label(
         sidebar,
-        text="使用方式",
+        text="影像处理",
         bg=SIDEBAR,
         fg=SIDEBAR_MUTED,
         font=("Microsoft YaHei UI", 8),
@@ -165,7 +201,7 @@ def run_gui_app(engine) -> int:
     ).grid(row=4, column=0, sticky="ew", padx=22, pady=(24, 4))
     license_title = tk.Label(
         sidebar,
-        text="本地离线 · 免授权",
+        text="本地处理 · 自动校验",
         bg=SIDEBAR,
         fg="#FFFFFF",
         font=("Microsoft YaHei UI", 8, "bold"),
@@ -176,7 +212,7 @@ def run_gui_app(engine) -> int:
     license_title.grid(row=5, column=0, sticky="ew", padx=22)
     tk.Label(
         sidebar,
-        text="容器转换与瓦片重排\n每次批量生成一份 PDF",
+        text="无需联网",
         bg=SIDEBAR,
         fg=SIDEBAR_MUTED,
         font=("Microsoft YaHei UI", 7),
@@ -185,22 +221,39 @@ def run_gui_app(engine) -> int:
         wraplength=180,
     ).grid(row=6, column=0, sticky="ew", padx=22, pady=(3, 10))
 
-    sidebar_buttons = ttk.Frame(sidebar, style="Sidebar.TFrame")
-    sidebar_buttons.grid(row=7, column=0, sticky="ew", padx=12)
-    sidebar_buttons.columnconfigure(0, weight=1)
+    art_size = (round(190*dpi_scale), round(200*dpi_scale))
+    art_holder = tk.Frame(sidebar, bg=SIDEBAR, width=art_size[0], height=art_size[1])
+    art_holder.grid(row=7, column=0, sticky="n", padx=12, pady=(12, 0))
+    art_holder.grid_propagate(False)
+    art_path = (Path(sys.executable).resolve().parent / "branding" / "layers-art.png"
+                if getattr(sys, "frozen", False) else Path(os.environ.get("TIFF_UI_ART", "")))
+    try:
+        from PIL import Image, ImageOps, ImageTk
+        if not art_path.is_file():
+            raise FileNotFoundError("无可选插画")
+        with Image.open(art_path) as source_art:
+            fitted = ImageOps.fit(source_art.convert("RGB"), art_size, method=Image.Resampling.LANCZOS)
+        art_holder.art_image = ImageTk.PhotoImage(fitted)
+        tk.Label(art_holder, image=art_holder.art_image, bg=SIDEBAR, borderwidth=0).pack()
+    except (ImportError, OSError, ValueError):
+        canvas = tk.Canvas(art_holder, width=art_size[0], height=art_size[1], bg="#285448", highlightthickness=0)
+        canvas.pack()
+        for y, color in ((70, "#7EA99A"), (88, "#679384"), (106, "#D1DBC9")):
+            points = [round(p*dpi_scale) for p in (28,y,94,y-31,162,y,94,y+31)]
+            canvas.create_polygon(*points, outline=color, fill="", width=max(1, round(2*dpi_scale)))
 
-    main = ttk.Frame(shell, style="App.TFrame", padding=(28, 22, 28, 18))
+    main = ttk.Frame(shell, style="App.TFrame", padding=(28, 14, 28, 10))
     main.grid(row=0, column=1, sticky="nsew")
     main.columnconfigure(0, weight=1)
-    main.rowconfigure(2, weight=3)
-    main.rowconfigure(5, weight=1)
+    main.rowconfigure(2, weight=3, minsize=80)
+    main.rowconfigure(5, weight=0)
 
     header = ttk.Frame(main, style="App.TFrame")
-    header.grid(row=0, column=0, sticky="ew", pady=(0, 16))
+    header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
     header.columnconfigure(0, weight=1)
     tk.Label(
         header,
-        text="转换任务",
+        text="开始转换",
         bg=BG,
         fg=TEXT,
         font=("Microsoft YaHei UI", 20, "bold"),
@@ -208,7 +261,7 @@ def run_gui_app(engine) -> int:
     ).grid(row=0, column=0, sticky="w")
     tk.Label(
         header,
-        text="转换并校验 TIFF 与 BigTIFF，支持瓦片重排",
+        text="选择方式，添加影像。",
         bg=BG,
         fg=MUTED,
         font=("Microsoft YaHei UI", 9),
@@ -225,12 +278,16 @@ def run_gui_app(engine) -> int:
     )
     count_badge.grid(row=0, column=1, rowspan=2, sticky="e")
 
-    toolbar_card = ttk.Frame(main, style="Card.TFrame", padding=14)
+    toolbar_card = ttk.Frame(main, style="Card.TFrame", padding=10)
     toolbar_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-    toolbar_card.columnconfigure(5, weight=1)
-    direction_box = ttk.Combobox(toolbar_card, textvariable=direction_var, state="readonly",
-                                 values=("普通 TIFF → 256瓦片普通 TIFF", "普通 TIFF → 256瓦片 BigTIFF", "普通 TIFF → BigTIFF", "BigTIFF → 普通 TIFF"), width=32)
-    direction_box.grid(row=1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    toolbar_card.columnconfigure(0, weight=1)
+    mode_frame = ttk.Frame(toolbar_card, style="Card.TFrame")
+    mode_frame.grid(row=0, column=0, sticky="ew")
+    for col in range(3):
+        mode_frame.columnconfigure(col, weight=1, uniform="modes")
+    ttk.Label(toolbar_card, textvariable=direction_hint_var, style="Muted.Card.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 7))
+    file_actions = ttk.Frame(toolbar_card, style="Card.TFrame")
+    file_actions.grid(row=2, column=0, sticky="ew")
 
     tree_card = ttk.Frame(main, style="Card.TFrame", padding=(1, 1, 1, 1))
     tree_card.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
@@ -241,19 +298,20 @@ def run_gui_app(engine) -> int:
         columns=("name", "folder", "status"),
         show="headings",
         selectmode="extended",
+        height=4,
     )
     tree.heading("name", text="文件名")
     tree.heading("folder", text="来源位置")
     tree.heading("status", text="状态")
-    tree.column("name", width=290, anchor="w")
-    tree.column("folder", width=510, anchor="w")
-    tree.column("status", width=95, anchor="center")
+    tree.column("name", width=180, minwidth=110, anchor="w")
+    tree.column("folder", width=320, minwidth=150, anchor="w")
+    tree.column("status", width=75, minwidth=65, stretch=False, anchor="center")
     tree_scroll = ttk.Scrollbar(tree_card, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=tree_scroll.set)
     tree.grid(row=0, column=0, sticky="nsew")
     tree_scroll.grid(row=0, column=1, sticky="ns")
 
-    options_card = ttk.Frame(main, style="Card.TFrame", padding=16)
+    options_card = ttk.Frame(main, style="Card.TFrame", padding=12)
     options_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
     options_card.columnconfigure(1, weight=1)
     tk.Label(
@@ -265,16 +323,16 @@ def run_gui_app(engine) -> int:
     ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 10))
     output_label = tk.Label(
         options_card,
-        text="输出与PDF报告文件夹",
+        text="保存到",
         bg=CARD,
         fg=MUTED,
         font=("Microsoft YaHei UI", 8),
     )
-    output_label.grid(row=1, column=0, sticky="w")
+    output_label.grid(row=2, column=0, sticky="w", pady=(6,0))
     output_entry = ttk.Entry(options_card, textvariable=output_var, style="Clean.TEntry")
-    output_entry.grid(row=1, column=1, sticky="ew", padx=(12, 8))
+    output_entry.grid(row=2, column=1, sticky="ew", padx=(12, 8), pady=(6,0))
 
-    progress_card = ttk.Frame(main, style="Card.TFrame", padding=16)
+    progress_card = ttk.Frame(main, style="Card.TFrame", padding=10)
     progress_card.grid(row=4, column=0, sticky="ew", pady=(0, 10))
     progress_card.columnconfigure(0, weight=1)
     progress_card.columnconfigure(1, weight=0)
@@ -295,7 +353,7 @@ def run_gui_app(engine) -> int:
     current_progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 4))
     overall_progress.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(3, 8))
 
-    log_card = ttk.Frame(main, style="Card.TFrame", padding=12)
+    log_card = ttk.Frame(main, style="Card.TFrame", padding=8)
     log_card.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
     log_card.columnconfigure(0, weight=1)
     log_card.rowconfigure(1, weight=1)
@@ -308,7 +366,7 @@ def run_gui_app(engine) -> int:
     ).grid(row=0, column=0, sticky="w", pady=(0, 6))
     log = tk.Text(
         log_card,
-        height=4,
+        height=2,
         wrap="word",
         relief="flat",
         borderwidth=0,
@@ -319,6 +377,7 @@ def run_gui_app(engine) -> int:
         state="disabled",
     )
     log.grid(row=1, column=0, sticky="nsew")
+    log_card.grid_remove()
 
     footer = ttk.Frame(main, style="App.TFrame")
     footer.grid(row=6, column=0, sticky="ew")
@@ -339,10 +398,11 @@ def run_gui_app(engine) -> int:
 
     def update_controls() -> None:
         file_count_var.set(f"{len(selected_files)} 个文件")
-        needs_reference = direction_var.get() == "普通 TIFF → 256瓦片普通 TIFF"
+        needs_reference = direction_var.get() == "to_classic_tiled"
         enabled = bool(selected_files) and bool(output_var.get().strip()) and (not needs_reference or bool(reference_var.get().strip())) and not running
         start_button.configure(state="normal" if enabled else "disabled")
-        direction_box.configure(state="disabled" if running else "readonly")
+        for button in mode_buttons:
+            button.configure(state="disabled" if running else "normal")
         report_button.configure(state="normal" if last_report and last_report.exists() else "disabled")
 
     def add_paths(paths: Iterable[str | Path]) -> int:
@@ -352,7 +412,7 @@ def run_gui_app(engine) -> int:
             if (
                 path.suffix.lower() not in engine.SUPPORTED_EXTENSIONS
                 or not path.is_file()
-                or engine.tiff_kind(path) != ("classic" if direction_var.get().startswith("普通") else "big")
+                or engine.tiff_kind(path) != ("big" if direction_var.get() == "to_classic" else "classic")
             ):
                 continue
             key = str(path).lower()
@@ -419,35 +479,59 @@ def run_gui_app(engine) -> int:
             overwrite_check.configure(state="normal")
 
     def selected_direction():
-        if "256瓦片" in direction_var.get():
-            return "to_big_tiled" if "BigTIFF" in direction_var.get() else "to_classic_tiled"
-        return "to_big" if direction_var.get().startswith("普通") else "to_classic"
+        return direction_var.get()
 
     def direction_changed(_event):
         if selected_direction() in ("to_big_tiled", "to_classic_tiled"):
             replace_original_var.set(False)
             replace_check.configure(state="disabled")
+            replace_check.grid_remove()
             toggle_replace_mode()
-            option_hint_var.set("瓦片模式仅生成副本；仅支持指定的无压缩 RGB 条带及部分 EXIF。")
+            option_hint_var.set("仅生成副本，支持部分无压缩 RGB TIFF。")
         else:
             replace_check.configure(state="normal")
+            replace_check.grid()
             toggle_replace_mode()
         if selected_direction() == "to_classic_tiled":
+            direction_hint_var.set("选择 YS 参考图，转换 TM 影像。")
             nodata_zero_var.set(True)
             nodata_check.configure(state="normal")
             reference_entry.configure(state="normal")
             reference_button.configure(state="normal")
-            option_hint_var.set("精简格式：去除 Photoshop/XMP/EXIF；空间定位输入将拒绝。仅生成副本。")
+            reference_label.grid()
+            reference_entry.grid()
+            reference_button.grid()
+            nodata_check.grid()
+            option_hint_var.set("去除编辑信息；带空间定位的影像不支持。")
         else:
             nodata_zero_var.set(False)
             nodata_check.configure(state="disabled")
             reference_entry.configure(state="disabled")
             reference_button.configure(state="disabled")
+            reference_label.grid_remove()
+            reference_entry.grid_remove()
+            reference_button.grid_remove()
+            nodata_check.grid_remove()
+            if selected_direction() == "to_big_tiled":
+                direction_hint_var.set("普通 TIFF → 256 瓦片 BigTIFF")
+            else:
+                direction_hint_var.set("BigTIFF → 普通 TIFF，保留图像块。")
         clear_all()
 
     def open_last_report() -> None:
         if last_report and last_report.exists():
             os.startfile(str(last_report))
+
+    def show_log() -> None:
+        detail = tk.Toplevel(root)
+        detail.title("运行详情")
+        detail.geometry("720x400")
+        detail.configure(bg=BG)
+        view = tk.Text(detail, wrap="word", padx=14, pady=12, relief="flat",
+                       bg=CARD, fg=TEXT, font=("Microsoft YaHei UI", 9))
+        view.pack(fill="both", expand=True, padx=16, pady=16)
+        view.insert("1.0", log.get("1.0", "end-1c") or "暂无运行记录")
+        view.configure(state="disabled")
 
     def worker(inputs, output_dir, overwrite, replace_original, direction, nodata_zero, reference) -> None:
         try:
@@ -511,21 +595,29 @@ def run_gui_app(engine) -> int:
             daemon=True,
         ).start()
 
-    ttk.Button(toolbar_card, text="添加文件", style="Secondary.TButton", command=choose_files).grid(row=0, column=0, padx=(0, 7))
-    ttk.Button(toolbar_card, text="添加文件夹", style="Secondary.TButton", command=choose_folder).grid(row=0, column=1, padx=7)
-    ttk.Button(toolbar_card, text="移除选中", style="Secondary.TButton", command=remove_selected).grid(row=0, column=2, padx=7)
-    ttk.Button(toolbar_card, text="清空", style="Secondary.TButton", command=clear_all).grid(row=0, column=3, padx=7)
-    ttk.Checkbutton(toolbar_card, text="递归扫描子文件夹", variable=recursive_var).grid(row=0, column=4, padx=(18, 0))
-    ttk.Button(options_card, text="选择", style="Secondary.TButton", command=choose_output).grid(row=1, column=2, padx=(0, 8))
+    mode_buttons = []
+    for i, (label, value) in enumerate((("TM → YS", "to_classic_tiled"),
+                                        ("转 BigTIFF", "to_big_tiled"),
+                                        ("转普通 TIFF", "to_classic"))):
+        button = ttk.Radiobutton(mode_frame, text=label, value=value, variable=direction_var,
+                                 command=lambda: direction_changed(None), style="Mode.TRadiobutton")
+        button.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 5, 0 if i == 2 else 5))
+        mode_buttons.append(button)
+    ttk.Button(file_actions, text="添加文件", style="Secondary.TButton", command=choose_files).grid(row=0, column=0, padx=(0, 7))
+    ttk.Button(file_actions, text="添加文件夹", style="Secondary.TButton", command=choose_folder).grid(row=0, column=1, padx=7)
+    ttk.Button(file_actions, text="移除选中", style="Secondary.TButton", command=remove_selected).grid(row=0, column=2, padx=7)
+    ttk.Button(file_actions, text="清空", style="Secondary.TButton", command=clear_all).grid(row=0, column=3, padx=7)
+    ttk.Checkbutton(file_actions, text="包含子文件夹", variable=recursive_var).grid(row=0, column=4, padx=(18, 0))
+    ttk.Button(options_card, text="选择目录", style="Secondary.TButton", command=choose_output).grid(row=2, column=2, padx=(0, 8), pady=(6,0))
     replace_check = ttk.Checkbutton(
         options_card,
         text="同名无损替换原文件",
         variable=replace_original_var,
         command=toggle_replace_mode,
     )
-    replace_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 4))
+    replace_check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 3))
     overwrite_check = ttk.Checkbutton(options_card, text="覆盖已存在的转换副本", variable=overwrite_var)
-    overwrite_check.grid(row=2, column=2, columnspan=2, sticky="w", pady=(12, 4))
+    overwrite_check.grid(row=3, column=2, columnspan=2, sticky="w", pady=(6, 3))
     hint_label = tk.Label(
         options_card,
         textvariable=option_hint_var,
@@ -537,18 +629,19 @@ def run_gui_app(engine) -> int:
         padx=8,
         pady=7,
     )
-    ttk.Label(options_card, text="参考 TIFF", style="Muted.Card.TLabel").grid(row=3, column=0, sticky="w", pady=(8,0))
+    reference_label = ttk.Label(options_card, text="YS 参考图", style="Muted.Card.TLabel")
+    reference_label.grid(row=1, column=0, sticky="w")
     reference_entry = ttk.Entry(options_card, textvariable=reference_var, style="Clean.TEntry")
-    reference_entry.grid(row=3, column=1, sticky="ew", padx=(12,8), pady=(8,0))
+    reference_entry.grid(row=1, column=1, sticky="ew", padx=(12,8))
     def choose_reference():
-        path = filedialog.askopenfilename(title="选择参考 TIFF", filetypes=[("TIFF", "*.tif *.tiff")])
+        path = filedialog.askopenfilename(title="选择 YS 参考图", filetypes=[("TIFF", "*.tif *.tiff")])
         if path:
             reference_var.set(path)
-    reference_button = ttk.Button(options_card, text="选择参考", style="Secondary.TButton", command=choose_reference)
-    reference_button.grid(row=3, column=2, padx=(0,8), pady=(8,0))
+    reference_button = ttk.Button(options_card, text="选择 YS 参考图", style="Secondary.TButton", command=choose_reference)
+    reference_button.grid(row=1, column=2, padx=(0,8))
     nodata_check = ttk.Checkbutton(options_card, text="将像素值 0 标记为 NoData", variable=nodata_zero_var)
-    nodata_check.grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 0))
-    hint_label.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+    nodata_check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 3))
+    hint_label.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(3, 0))
 
     tk.Label(
         sidebar,
@@ -560,10 +653,11 @@ def run_gui_app(engine) -> int:
         anchor="sw",
     ).grid(row=9, column=0, sticky="sw", padx=22, pady=20)
 
-    report_button = ttk.Button(footer, text="打开PDF报告", style="Secondary.TButton", command=open_last_report, state="disabled")
-    report_button.grid(row=0, column=1, padx=(12, 8))
+    ttk.Button(footer, text="运行详情", style="Secondary.TButton", command=show_log).grid(row=0, column=1, padx=(12, 8))
+    report_button = ttk.Button(footer, text="打开报告", style="Secondary.TButton", command=open_last_report, state="disabled")
+    report_button.grid(row=0, column=2, padx=(0, 8))
     start_button = ttk.Button(footer, text="开始转换", style="Primary.TButton", command=start_conversion, state="disabled")
-    start_button.grid(row=0, column=2)
+    start_button.grid(row=0, column=3)
 
     def poll_events() -> None:
         nonlocal running, last_report
@@ -627,9 +721,9 @@ def run_gui_app(engine) -> int:
 
     output_var.trace_add("write", lambda *_: update_controls())
     reference_var.trace_add("write", lambda *_: update_controls())
-    direction_box.bind("<<ComboboxSelected>>", direction_changed)
     root.protocol("WM_DELETE_WINDOW", on_close)
     direction_changed(None)
+    status_var.set("请添加待转换的 TIFF 影像")
     update_controls()
     root.after(120, poll_events)
     if smoke_test:

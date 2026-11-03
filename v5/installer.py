@@ -49,16 +49,43 @@ def main():
         install_to(Path(args.install_to))
         return 0
 
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        except (AttributeError, OSError):
+            pass
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
-    root.title("TIFF 双向转换工具 V5 安装")
-    root.geometry("560x260")
+    icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "branding" / "app.ico"
+    try:
+        if not icon_path.is_file():
+            raise FileNotFoundError("无可选图标")
+        root.iconbitmap(default=str(icon_path))
+    except (OSError, tk.TclError):
+        icon = tk.PhotoImage(width=32, height=32)
+        icon.put("#173D37", to=(0, 0, 32, 32))
+        icon.put("#A9D5BD", to=(6, 8, 26, 12))
+        icon.put("#78B89D", to=(8, 14, 24, 18))
+        icon.put("#E0EAD9", to=(10, 20, 22, 24))
+        root.iconphoto(True, icon)
+        root.brand_icon = icon
+    root.title("影像格式转换 安装")
+    dpi = 96
+    if sys.platform == "win32":
+        try:
+            dpi = ctypes.windll.user32.GetDpiForWindow(root.winfo_id()) or 96
+        except (AttributeError, OSError):
+            pass
+    scale = max(1.0, min(dpi / 96.0, 2.5))
+    root.tk.call("tk", "scaling", dpi / 72.0)
+    root.geometry(f"{round(560*scale)}x{round(260*scale)}")
     root.resizable(False, False)
     frame = ttk.Frame(root, padding=24)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="TIFF 双向转换工具 V5", font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w")
+    ttk.Label(frame, text="影像格式转换", font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w")
     ttk.Label(frame, text="无需 Python、无需许可证。选择安装位置后安装。", wraplength=500).pack(anchor="w", pady=(8, 16))
     default = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / "TIFF_Converter_V5"
     location = tk.StringVar(value=str(default))

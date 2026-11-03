@@ -53,9 +53,9 @@ $env:TIFF_INSTALLER_PAYLOAD = (Resolve-Path payload.zip).Path
 .\.venv\Scripts\python.exe -m PyInstaller --distpath setup-dist v4\installer.spec
 ```
 
-构建脚本排除影像文件；生成的 `payload.zip` 和 `setup-dist` 不应提交到源码仓库。
+构建脚本排除实际影像与测试材料；生成的 `payload.zip` 和 `setup-dist` 不应提交到源码仓库。
 
-V5 构建时以 `v5\app.py`、`v5\build_payload.py` 和 `v5\installer.spec` 替换上述版本路径，程序名改为 `TIFF_Converter_V5`。
+V5 构建时以 `v5\app.py`、`v5\build_payload.py` 和 `v5\installer.spec` 替换上述版本路径，程序名改为 `TIFF_Converter_V5`。可选抽象插画和图标分别通过 `--art`、`--icon` 显式传入，并校验固定哈希；不提供时使用程序内绘制的图形。源码仓库不包含影像文件。
 
 ## 测试与边界
 

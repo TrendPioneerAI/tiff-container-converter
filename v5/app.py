@@ -1,6 +1,25 @@
 """Windows GUI and command line entry point."""
 import argparse
+import sys
 from pathlib import Path
+
+def enable_high_dpi():
+    """Opt in before Tk creates any windows; leave other processes untouched."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    try:
+        user32 = ctypes.windll.user32
+        if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    except (AttributeError, OSError):
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except (AttributeError, OSError):
+        pass
+
+enable_high_dpi()
 
 import engine
 from modern_gui import run_gui_app
