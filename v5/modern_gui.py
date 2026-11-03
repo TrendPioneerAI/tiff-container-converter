@@ -103,7 +103,9 @@ def run_gui_app(engine) -> int:
     output_var = tk.StringVar()
     file_count_var = tk.StringVar(value="0 个文件")
     status_var = tk.StringVar(value="添加普通 TIFF 文件或文件夹以开始")
-    direction_var = tk.StringVar(value="普通 TIFF → 256瓦片 BigTIFF")
+    direction_var = tk.StringVar(value="普通 TIFF → 256瓦片普通 TIFF")
+    nodata_zero_var = tk.BooleanVar(value=True)
+    reference_var = tk.StringVar()
     option_hint_var = tk.StringVar(value="转换结果保存到指定文件夹，源文件保持不变。")
 
     shell = ttk.Frame(root, style="App.TFrame")
@@ -227,7 +229,7 @@ def run_gui_app(engine) -> int:
     toolbar_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
     toolbar_card.columnconfigure(5, weight=1)
     direction_box = ttk.Combobox(toolbar_card, textvariable=direction_var, state="readonly",
-                                 values=("普通 TIFF → BigTIFF", "普通 TIFF → 256瓦片 BigTIFF", "BigTIFF → 普通 TIFF"), width=32)
+                                 values=("普通 TIFF → 256瓦片普通 TIFF", "普通 TIFF → 256瓦片 BigTIFF", "普通 TIFF → BigTIFF", "BigTIFF → 普通 TIFF"), width=32)
     direction_box.grid(row=1, column=0, columnspan=3, sticky="w", pady=(12, 0))
 
     tree_card = ttk.Frame(main, style="Card.TFrame", padding=(1, 1, 1, 1))
@@ -337,7 +339,8 @@ def run_gui_app(engine) -> int:
 
     def update_controls() -> None:
         file_count_var.set(f"{len(selected_files)} 个文件")
-        enabled = bool(selected_files) and bool(output_var.get().strip()) and not running
+        needs_reference = direction_var.get() == "普通 TIFF → 256瓦片普通 TIFF"
+        enabled = bool(selected_files) and bool(output_var.get().strip()) and (not needs_reference or bool(reference_var.get().strip())) and not running
         start_button.configure(state="normal" if enabled else "disabled")
         direction_box.configure(state="disabled" if running else "readonly")
         report_button.configure(state="normal" if last_report and last_report.exists() else "disabled")
@@ -417,11 +420,11 @@ def run_gui_app(engine) -> int:
 
     def selected_direction():
         if "256瓦片" in direction_var.get():
-            return "to_big_tiled"
+            return "to_big_tiled" if "BigTIFF" in direction_var.get() else "to_classic_tiled"
         return "to_big" if direction_var.get().startswith("普通") else "to_classic"
 
     def direction_changed(_event):
-        if selected_direction() == "to_big_tiled":
+        if selected_direction() in ("to_big_tiled", "to_classic_tiled"):
             replace_original_var.set(False)
             replace_check.configure(state="disabled")
             toggle_replace_mode()
@@ -429,13 +432,24 @@ def run_gui_app(engine) -> int:
         else:
             replace_check.configure(state="normal")
             toggle_replace_mode()
+        if selected_direction() == "to_classic_tiled":
+            nodata_zero_var.set(True)
+            nodata_check.configure(state="normal")
+            reference_entry.configure(state="normal")
+            reference_button.configure(state="normal")
+            option_hint_var.set("精简格式：去除 Photoshop/XMP/EXIF；空间定位输入将拒绝。仅生成副本。")
+        else:
+            nodata_zero_var.set(False)
+            nodata_check.configure(state="disabled")
+            reference_entry.configure(state="disabled")
+            reference_button.configure(state="disabled")
         clear_all()
 
     def open_last_report() -> None:
         if last_report and last_report.exists():
             os.startfile(str(last_report))
 
-    def worker(inputs, output_dir, overwrite, replace_original, direction) -> None:
+    def worker(inputs, output_dir, overwrite, replace_original, direction, nodata_zero, reference) -> None:
         try:
             engine.convert_batch(
                 inputs,
@@ -445,6 +459,8 @@ def run_gui_app(engine) -> int:
                 replace_original=replace_original,
                 input_scope="多文件/文件夹选择",
                 event_callback=event_queue.put,
+                nodata_zero=nodata_zero,
+                reference=reference,
             )
         except Exception as exc:
             event_queue.put(("fatal_error", str(exc)))
@@ -456,6 +472,9 @@ def run_gui_app(engine) -> int:
             return
         if not output_var.get().strip():
             messagebox.showerror(engine.APP_NAME, "请选择PDF报告和输出保存文件夹。")
+            return
+        if selected_direction() == "to_classic_tiled" and not Path(reference_var.get().strip()).is_file():
+            messagebox.showerror(engine.APP_NAME, "请选择参考 TIFF 文件。")
             return
         if replace_original_var.get():
             confirmed = messagebox.askyesno(
@@ -486,6 +505,8 @@ def run_gui_app(engine) -> int:
                 overwrite_var.get(),
                 replace_original_var.get(),
                 selected_direction(),
+                nodata_zero_var.get(),
+                reference_var.get().strip() if selected_direction() == "to_classic_tiled" else None,
             ),
             daemon=True,
         ).start()
@@ -516,7 +537,18 @@ def run_gui_app(engine) -> int:
         padx=8,
         pady=7,
     )
-    hint_label.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+    ttk.Label(options_card, text="参考 TIFF", style="Muted.Card.TLabel").grid(row=3, column=0, sticky="w", pady=(8,0))
+    reference_entry = ttk.Entry(options_card, textvariable=reference_var, style="Clean.TEntry")
+    reference_entry.grid(row=3, column=1, sticky="ew", padx=(12,8), pady=(8,0))
+    def choose_reference():
+        path = filedialog.askopenfilename(title="选择参考 TIFF", filetypes=[("TIFF", "*.tif *.tiff")])
+        if path:
+            reference_var.set(path)
+    reference_button = ttk.Button(options_card, text="选择参考", style="Secondary.TButton", command=choose_reference)
+    reference_button.grid(row=3, column=2, padx=(0,8), pady=(8,0))
+    nodata_check = ttk.Checkbutton(options_card, text="将像素值 0 标记为 NoData", variable=nodata_zero_var)
+    nodata_check.grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 0))
+    hint_label.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(6, 0))
 
     tk.Label(
         sidebar,
@@ -594,6 +626,7 @@ def run_gui_app(engine) -> int:
         root.destroy()
 
     output_var.trace_add("write", lambda *_: update_controls())
+    reference_var.trace_add("write", lambda *_: update_controls())
     direction_box.bind("<<ComboboxSelected>>", direction_changed)
     root.protocol("WM_DELETE_WINDOW", on_close)
     direction_changed(None)

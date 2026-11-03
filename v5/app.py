@@ -11,7 +11,9 @@ def main():
     parser.add_argument("inputs", nargs="*", help="输入 TIFF 文件")
     parser.add_argument("--folder", help="扫描输入文件夹")
     parser.add_argument("--recursive", action="store_true")
-    parser.add_argument("--direction", choices=("to_big", "to_big_tiled", "to_classic"), default="to_big")
+    parser.add_argument("--direction", choices=("to_big", "to_big_tiled", "to_classic", "to_classic_tiled"), default="to_big")
+    parser.add_argument("--nodata-zero", action="store_true", help="普通瓦片模式将0标记为NoData")
+    parser.add_argument("--reference", help="普通瓦片模式的参考 TIFF")
     parser.add_argument("--output-dir", help="输出与 PDF 报告文件夹")
     parser.add_argument("--replace-original", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
@@ -26,7 +28,7 @@ def main():
         parser.error("命令行批量处理需要指定 --output-dir")
     summary, report = engine.convert_batch(
         paths, Path(args.output_dir), direction=args.direction, overwrite=args.overwrite,
-        replace_original=args.replace_original, input_scope=args.folder or "命令行文件选择",
+        replace_original=args.replace_original, input_scope=args.folder or "命令行文件选择", nodata_zero=args.nodata_zero, reference=args.reference,
     )
     print(f"成功 {summary['passed']}，失败 {summary['failed']}，PDF：{report}")
     return 1 if summary["failed"] else 0

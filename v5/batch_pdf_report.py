@@ -142,8 +142,8 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
     failed = int(summary.get("failed", 0))
     overall_status = "全部成功" if failed == 0 else "部分失败"
     mode_text = "验证后原位替换" if summary.get("replace_original") else "输出到指定文件夹"
-    direction_text = {"to_big": "普通 TIFF 转 BigTIFF", "to_big_tiled": "普通 TIFF 转 256 瓦片 BigTIFF", "to_classic": "BigTIFF 转普通 TIFF"}.get(summary.get("direction"), "转换")
-    tiled = summary.get("direction") == "to_big_tiled"
+    direction_text = {"to_big": "普通 TIFF 转 BigTIFF", "to_big_tiled": "普通 TIFF 转 256 瓦片 BigTIFF", "to_classic": "BigTIFF 转普通 TIFF", "to_classic_tiled": "普通 TIFF 转 256 瓦片普通 TIFF"}.get(summary.get("direction"), "转换")
+    tiled = summary.get("direction") in ("to_big_tiled", "to_classic_tiled")
 
     doc = SimpleDocTemplate(
         str(output_path),
@@ -236,6 +236,11 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
         )
     )
     story.extend([summary_table, Paragraph("处理范围", heading)])
+    if summary.get("direction") == "to_classic_tiled":
+        nodata_text = "按设置将数值 0 标记为 NoData，像素值未改变。" if summary.get("nodata_zero") else "不写入 NoData；带有 NoData 的输入会被拒绝。"
+        story.append(Paragraph(nodata_text, body))
+        story.append(Paragraph("输出使用精简标签及单位像素坐标；不保留输入的 Photoshop、XMP、EXIF 等附加标签。含空间定位标签的输入会被拒绝。", body))
+        story.append(Paragraph("成功文件已与所选参考文件核对标签类型、非偏移标签值及文件字节数。", body))
     story.append(
         Paragraph(
             "输入位置：" + _path_text(summary.get("input_scope", "多文件选择")) + "<br/>"
@@ -267,7 +272,7 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
                 Paragraph("成功" if result.get("status") == "PASS" else "失败", cell_center),
                 Paragraph("替换原文件" if result.get("replaced_original") else "生成副本", cell_center),
                 Paragraph("一致" if validation.get("pixel_identical", validation.get("raw_image_payload_identical")) else "-", cell_center),
-                Paragraph("一致" if validation.get("non_structural_metadata_identical") else "-", cell_center),
+                Paragraph("精简" if validation.get("metadata_profile") == "minimal_pixel_space" else ("一致" if validation.get("non_structural_metadata_identical") else "-"), cell_center),
                 Paragraph(f"{float(report.get('elapsed_seconds', 0)):.2f}s", cell_center),
             ]
         )
@@ -340,7 +345,7 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
         story.extend([PageBreak(), Paragraph("完整性校验明细", heading)])
         story.append(
             Paragraph(
-                ("下表记录全部有效像素和受支持的非结构性元数据 SHA-256；瓦片重排会改变图像块布局。" if tiled else "下表记录转换前后均一致的图像块与非结构性元数据SHA-256。哈希值相同表示已经写入TIFF的像素、匀色结果和业务标签没有被重新计算或修改。"),
+                ("下表记录全部有效像素和核对的基础标签 SHA-256；精简模式会移除输入附加标签。" if summary.get("direction") == "to_classic_tiled" else ("下表记录全部有效像素和受支持的非结构性元数据 SHA-256；瓦片重排会改变图像块布局。" if tiled else "下表记录转换前后均一致的图像块与非结构性元数据SHA-256。哈希值相同表示已经写入TIFF的像素、匀色结果和业务标签没有被重新计算或修改。")),
                 body,
             )
         )
@@ -378,7 +383,7 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
         [
             Paragraph("结构变化说明", heading),
             Paragraph(
-                ("图像按256×256瓦片重新排列，不进行重采样或调色；只保留输入中受支持的标签，无法恢复已缺失的信息。瓦片模式只生成副本。"
+                ("图像按256×256瓦片重新排列，不进行重采样或调色；输出标签遵循所选精简格式，无法恢复已缺失的信息。瓦片模式只生成副本。"
                  if tiled else "两种容器的文件头、IFD结构及图像块偏移需要重新生成；普通 TIFF 使用32位偏移，BigTIFF使用64位偏移。工具直接复制图像块，不重新采样、调色或压缩；不能恢复输入文件中已经缺失的标签。原位替换会保留原文件备份；异常文件记录在报告中，继续处理其他文件。"),
                 body,
             ),

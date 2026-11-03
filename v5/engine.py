@@ -11,10 +11,11 @@ from pathlib import Path
 
 import tiff_core as base
 import retile
+import classic_tile
 from batch_pdf_report import generate_batch_pdf
 
 APP_NAME = "TIFF 双向转换工具"
-APP_VERSION = "5.0.0"
+APP_VERSION = "5.1.0"
 SUPPORTED_EXTENSIONS = base.SUPPORTED_EXTENSIONS
 ConversionError = base.ConversionError
 
@@ -163,18 +164,24 @@ def _stat_signature(path):
 
 
 def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
-                  replace_original=False, input_scope="多文件/文件夹选择", event_callback=None):
-    if direction not in ("to_big", "to_big_tiled", "to_classic"):
+                  replace_original=False, input_scope="多文件/文件夹选择", event_callback=None,
+                  nodata_zero=False, reference=None):
+    if direction not in ("to_big", "to_big_tiled", "to_classic", "to_classic_tiled"):
         raise ConversionError("未知转换方向")
-    if direction == "to_big_tiled" and replace_original:
+    if direction in ("to_big_tiled", "to_classic_tiled") and replace_original:
         raise ConversionError("瓦片重排仅支持生成副本，不支持替换原文件")
+    if nodata_zero and direction != "to_classic_tiled":
+        raise ConversionError("NoData 选项仅用于普通 TIFF 瓦片模式")
+    if direction == "to_classic_tiled" and not reference:
+        raise ConversionError("请选择参考 TIFF")
+    reference = Path(reference).resolve() if reference else None
     inputs = list(dict.fromkeys(Path(p).resolve() for p in inputs))
     if not inputs:
         raise ConversionError("未选择输入文件")
     outdir = Path(output_dir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
     wanted = "big" if direction == "to_classic" else "classic"
-    suffix = {"to_big": "-bigtiff", "to_big_tiled": "-tiled-bigtiff", "to_classic": "-classic"}[direction]
+    suffix = {"to_big": "-bigtiff", "to_big_tiled": "-tiled-bigtiff", "to_classic": "-classic", "to_classic_tiled": "-tiled-classic"}[direction]
     results, used = [], set()
     started = time.strftime("%Y-%m-%d %H:%M:%S")
     def emit(*event):
@@ -196,26 +203,33 @@ def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
             used.add(str(dest).lower())
             if not replace_original and dest.resolve() in inputs:
                 raise ConversionError("输出路径与批次输入重叠，已拒绝覆盖")
+            if reference and dest.resolve() == reference:
+                raise ConversionError("输出路径与参考文件重叠，已拒绝覆盖")
             if not replace_original and dest.exists() and not overwrite:
                 raise ConversionError("输出文件已存在；请勾选覆盖副本或选择其他文件夹")
             temp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.pending")
             if direction == "to_big":
                 report = _reverse(source, temp, progress)
-            elif direction == "to_big_tiled":
+            elif direction in ("to_big_tiled", "to_classic_tiled"):
                 tile_started = time.time()
-                tile = retile.convert(source, temp, lambda message: progress("copy", 0, 0, message))
+                on_progress = lambda message: progress("copy", 0, 0, message)
+                tile = (classic_tile.convert(source, temp, on_progress, nodata_zero=nodata_zero, reference=reference)
+                        if direction == "to_classic_tiled" else retile.convert(source, temp, on_progress))
                 report = {"status": "PASS", "input": {"path": str(source)},
                           "output": {"path": str(temp)}, "elapsed_seconds": time.time() - tile_started,
                           "validation": {"method": "pixel_retile", "pixel_sha256_input": tile["pixels_sha256"],
                                          "pixel_sha256_output": tile["pixel_hash_output"],
                                          "pixel_identical": True,
+                                         "nodata_zero": nodata_zero,
+                                         "reference_size_equal": tile.get("reference_size_equal"),
+                                         "metadata_profile": tile.get("metadata_profile", "preserve"),
                                          "non_structural_metadata_sha256_output": tile["metadata_sha256"],
-                                         "non_structural_metadata_identical": True}}
+                                         "non_structural_metadata_identical": direction != "to_classic_tiled"}}
             else:
                 report = base.convert(source, temp, None, False, True, progress)
             if _stat_signature(source) != before:
                 raise ConversionError("转换期间源文件发生变化，已取消替换")
-            if direction == "to_big_tiled":
+            if direction in ("to_big_tiled", "to_classic_tiled"):
                 if retile.source_pixels_sha256(source) != report["validation"]["pixel_sha256_input"]:
                     raise ConversionError("源文件像素再次校验不一致")
             else:
@@ -277,6 +291,8 @@ def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
         "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "input_scope": input_scope, "output_scope": str(outdir),
         "replace_original": replace_original, "total": len(results),
+        "nodata_zero": nodata_zero,
+        "reference": str(reference) if reference else None,
         "passed": sum(x["status"] == "PASS" for x in results),
         "failed": sum(x["status"] != "PASS" for x in results), "results": results,
     }
