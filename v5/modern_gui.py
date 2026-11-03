@@ -407,6 +407,7 @@ def run_gui_app(engine) -> int:
 
     def add_paths(paths: Iterable[str | Path]) -> int:
         added = 0
+        skipped = 0
         for raw_path in paths:
             path = Path(raw_path).resolve()
             if (
@@ -414,6 +415,7 @@ def run_gui_app(engine) -> int:
                 or not path.is_file()
                 or engine.tiff_kind(path) != ("big" if direction_var.get() == "to_classic" else "classic")
             ):
+                skipped += 1
                 continue
             key = str(path).lower()
             if key in selected_files:
@@ -426,6 +428,8 @@ def run_gui_app(engine) -> int:
             output_var.set(str(first.parent / "TIFF_Output"))
         status_var.set(f"已添加 {added} 个文件，共 {len(selected_files)} 个")
         update_controls()
+        if skipped:
+            messagebox.showwarning(engine.APP_NAME, f"已跳过 {skipped} 个文件：无法读取或格式与转换方向不匹配。")
         return added
 
     def choose_files() -> None:
@@ -616,7 +620,7 @@ def run_gui_app(engine) -> int:
         command=toggle_replace_mode,
     )
     replace_check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 3))
-    overwrite_check = ttk.Checkbutton(options_card, text="覆盖已存在的转换副本", variable=overwrite_var)
+    overwrite_check = ttk.Checkbutton(options_card, text="同名覆盖（默认自动编号）", variable=overwrite_var)
     overwrite_check.grid(row=3, column=2, columnspan=2, sticky="w", pady=(6, 3))
     hint_label = tk.Label(
         options_card,
@@ -690,16 +694,39 @@ def run_gui_app(engine) -> int:
                 elif event[0] == "batch_done":
                     _, summary, summary_path, pdf_info = event
                     running = False
-                    last_report = Path(summary_path)
+                    last_report = Path(summary_path) if summary_path else None
                     current_progress["value"] = 100
                     overall_progress["value"] = 100
                     status_var.set(f"批次完成 · 成功 {summary['passed']} · 失败 {summary['failed']}")
-                    append_log(f"PDF报告 · {summary_path} · {pdf_info['pages']}页")
+                    report_error = summary.get("report_error")
+                    if last_report:
+                        append_log(f"PDF报告 · {summary_path} · {pdf_info['pages']}页")
+                    else:
+                        append_log(f"PDF报告未生成 · {report_error or '未知错误'}")
                     update_controls()
-                    messagebox.showinfo(
-                        engine.APP_NAME,
-                        f"批次完成\n\n成功：{summary['passed']}\n失败：{summary['failed']}\nPDF报告：{summary_path}",
-                    )
+                    if summary["failed"]:
+                        first_failure = next((item for item in summary["results"]
+                                              if item.get("status") != "PASS"), {})
+                        failed_name = Path(first_failure.get("input", "")).name
+                        reason = str(first_failure.get("error", "请查看运行详情"))
+                        messagebox.showerror(
+                            engine.APP_NAME,
+                            f"批次完成\n\n成功：{summary['passed']}\n失败：{summary['failed']}\n\n"
+                            f"{failed_name}：{reason[:500]}\n\n"
+                            + (f"报告未生成：{report_error}\n\n" if report_error else "")
+                            + "完整记录请查看运行详情" + ("或报告。" if last_report else "。"),
+                        )
+                    elif report_error:
+                        messagebox.showwarning(
+                            engine.APP_NAME,
+                            f"影像转换完成：成功 {summary['passed']} 个。\n\n"
+                            f"PDF报告未生成：{report_error}\n\n转换结果已保存在指定文件夹。",
+                        )
+                    else:
+                        messagebox.showinfo(
+                            engine.APP_NAME,
+                            f"批次完成\n\n成功：{summary['passed']}\n失败：0\nPDF报告：{summary_path}",
+                        )
                 elif event[0] == "fatal_error":
                     running = False
                     status_var.set("任务发生异常，请查看运行详情")

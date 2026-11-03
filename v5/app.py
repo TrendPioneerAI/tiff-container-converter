@@ -49,8 +49,11 @@ def main():
         paths, Path(args.output_dir), direction=args.direction, overwrite=args.overwrite,
         replace_original=args.replace_original, input_scope=args.folder or "命令行文件选择", nodata_zero=args.nodata_zero, reference=args.reference,
     )
-    print(f"成功 {summary['passed']}，失败 {summary['failed']}，PDF：{report}")
-    return 1 if summary["failed"] else 0
+    if report:
+        print(f"成功 {summary['passed']}，失败 {summary['failed']}，PDF：{report}")
+    else:
+        print(f"成功 {summary['passed']}，失败 {summary['failed']}，PDF报告未生成：{summary.get('report_error')}")
+    return 1 if summary["failed"] else (2 if summary.get("report_error") else 0)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from typing import BinaryIO, Callable, Iterable
 
 
 APP_NAME = "BigTIFF 转普通 TIFF 工具"
-APP_VERSION = "5.2.0"
+APP_VERSION = "5.3.0"
 CLASSIC_MAX = 0xFFFFFFFF
 COPY_BUFFER = 8 * 1024 * 1024
 MAX_IFDS = 4096

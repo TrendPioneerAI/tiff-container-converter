@@ -31,7 +31,7 @@ def convert(source,target,progress=lambda s:None):
     p,exif=ex.parse(source)
     if p.variant!='ClassicTIFF': raise ValueError('输入必须是普通 TIFF')
     page=p.ifds[0];tags={x.tag:x for x in page.entries}; e=p.endian
-    for tag,val in ((259,1),(262,2),(277,3),(278,1),(284,1)):
+    for tag,val in ((259,1),(262,2),(277,3),(284,1)):
         if tag not in tags or number(tags[tag],e)!=val: raise ValueError(f'不支持该文件的标签 {tag}')
     if tags[258].type_id!=3 or tags[258].count!=3 or struct.unpack(e+'HHH',tags[258].raw)!=(8,8,8):
         raise ValueError('仅支持每通道 8 位 RGB')
@@ -40,10 +40,18 @@ def convert(source,target,progress=lambda s:None):
         if sample.type_id!=3 or sample.count not in (1,3) or any(v!=1 for v in struct.unpack(e+'H'*sample.count,sample.raw)):
             raise ValueError('仅支持无符号整数样本')
     w,h=number(tags[256],e),number(tags[257],e)
-    if page.data_offsets_tag!=273 or len(page.chunk_bytecounts)!=h or any(n!=w*3 for n in page.chunk_bytecounts):
-        raise ValueError('仅支持逐行无压缩条带')
-    if w <= 0 or h <= 0 or w*3*256 > 128*1024*1024:
+    if page.data_offsets_tag != 273:
+        raise ValueError('仅支持无压缩条带输入')
+    # TIFF 6.0 defaults an absent RowsPerStrip to 2**32 - 1 (one strip).
+    rows_per_strip = number(tags[278], e) if 278 in tags else 0xFFFFFFFF
+    if w <= 0 or h <= 0 or rows_per_strip <= 0 or w*3*256 > 128*1024*1024:
         raise ValueError('图像尺寸超出安全处理范围')
+    strip_count = (h + rows_per_strip - 1) // rows_per_strip
+    if len(page.chunk_bytecounts) != strip_count or any(
+        n != min(rows_per_strip, h - i * rows_per_strip) * w * 3
+        for i, n in enumerate(page.chunk_bytecounts)
+    ):
+        raise ValueError('条带数量或长度不符合无压缩 RGB 结构')
     cols=(w+255)//256;rows=(h+255)//256;count=cols*rows;tilebytes=256*256*3
     if count > 1000000: raise ValueError('瓦片数超出安全处理范围')
     entries=[]
@@ -84,7 +92,9 @@ def convert(source,target,progress=lambda s:None):
             for ty in range(rows):
                 actual=min(256,h-ty*256); image_rows=[]
                 for j in range(actual):
-                    i=ty*256+j;inp.seek(page.source_chunk_offsets[i]);b=core.read_exact(inp,w*3,'源影像行');image_rows.append(b);source_digest.update(b)
+                    i=ty*256+j
+                    inp.seek(page.source_chunk_offsets[i//rows_per_strip] + (i%rows_per_strip)*w*3)
+                    b=core.read_exact(inp,w*3,'源影像行');image_rows.append(b);source_digest.update(b)
                 for tx in range(cols):
                     tile=bytearray(tilebytes);tw=min(256,w-tx*256)*3
                     for j,row in enumerate(image_rows):tile[j*768:j*768+tw]=row[tx*768:tx*768+tw]

@@ -10,6 +10,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     KeepTogether,
@@ -35,10 +36,25 @@ ERROR_BG = colors.HexColor("#FEF3F2")
 
 
 def register_fonts() -> tuple[str, str]:
-    candidates = [
-        (Path(r"C:\Windows\Fonts\msyh.ttc"), Path(r"C:\Windows\Fonts\msyhbd.ttc")),
-        (Path(r"C:\Windows\Fonts\simhei.ttf"), Path(r"C:\Windows\Fonts\simhei.ttf")),
-    ]
+    font_dirs = []
+    if os.name == "nt":
+        try:
+            import ctypes
+            buffer = ctypes.create_unicode_buffer(32768)
+            # CSIDL_FONTS resolves the actual Windows Fonts directory.
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x14, None, 0, buffer) == 0:
+                font_dirs.append(Path(buffer.value))
+        except (AttributeError, OSError):
+            pass
+    for variable in ("WINDIR", "SystemRoot"):
+        if os.environ.get(variable):
+            font_dirs.append(Path(os.environ[variable]) / "Fonts")
+    candidates = []
+    for folder in dict.fromkeys(font_dirs):
+        for regular, bold in (("msyh.ttc", "msyhbd.ttc"), ("simhei.ttf", "simhei.ttf"),
+                              ("simsun.ttc", "simsun.ttc"), ("Deng.ttf", "Dengb.ttf")):
+            regular_path, bold_path = folder / regular, folder / bold
+            candidates.append((regular_path, bold_path if bold_path.is_file() else regular_path))
     for regular, bold in candidates:
         if regular.is_file() and bold.is_file():
             try:
@@ -49,7 +65,13 @@ def register_fonts() -> tuple[str, str]:
                 return "BTFC-CN", "BTFC-CN-Bold"
             except Exception:
                 continue
-    raise RuntimeError("未找到可嵌入PDF的中文字体（需要微软雅黑或黑体）")
+    # Standard CJK CID font: works without relying on a specific local font file.
+    fallback = "STSong-Light"
+    if fallback not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(UnicodeCIDFont(fallback))
+    pdfmetrics.registerFontFamily(fallback, normal=fallback, bold=fallback,
+                                  italic=fallback, boldItalic=fallback)
+    return fallback, fallback
 
 
 def _escaped(value: object) -> str:
@@ -140,7 +162,7 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
     total = int(summary.get("total", 0))
     passed = int(summary.get("passed", 0))
     failed = int(summary.get("failed", 0))
-    overall_status = "全部成功" if failed == 0 else "部分失败"
+    overall_status = "全部成功" if failed == 0 else ("全部失败" if passed == 0 else "部分失败")
     mode_text = "验证后原位替换" if summary.get("replace_original") else "输出到指定文件夹"
     direction_text = {"to_big": "普通 TIFF 转 BigTIFF", "to_big_tiled": "普通 TIFF 转 256 瓦片 BigTIFF", "to_classic": "BigTIFF 转普通 TIFF", "to_classic_tiled": "普通 TIFF 转 256 瓦片普通 TIFF"}.get(summary.get("direction"), "转换")
     tiled = summary.get("direction") in ("to_big_tiled", "to_classic_tiled")
@@ -254,7 +276,7 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
     result_rows = [
         [
             Paragraph("序号", cell_center),
-            Paragraph("文件", cell_center),
+            Paragraph("输入 / 输出文件", cell_center),
             Paragraph("结果", cell_center),
             Paragraph("处理方式", cell_center),
             Paragraph("像素", cell_center),
@@ -268,7 +290,9 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
         result_rows.append(
             [
                 Paragraph(str(index), cell_center),
-                Paragraph(_escaped(Path(result.get("input", "-")).name), cell),
+                Paragraph(_escaped(Path(result.get("input", "-")).name) +
+                          ("<br/>输出：" + _escaped(Path(result["output"]).name)
+                           if result.get("status") == "PASS" and result.get("output") else ""), cell),
                 Paragraph("成功" if result.get("status") == "PASS" else "失败", cell_center),
                 Paragraph("替换原文件" if result.get("replaced_original") else "生成副本", cell_center),
                 Paragraph("一致" if validation.get("pixel_identical", validation.get("raw_image_payload_identical")) else "-", cell_center),
@@ -384,6 +408,8 @@ def generate_batch_pdf(summary: dict, output_path: Path) -> dict:
             Paragraph("结构变化说明", heading),
             Paragraph(
                 ("图像按256×256瓦片重新排列，不进行重采样或调色；输出标签遵循所选精简格式，无法恢复已缺失的信息。瓦片模式只生成副本。"
+                 if summary.get("direction") == "to_classic_tiled" else
+                 "图像按256×256瓦片重新排列，不进行重采样或调色；保留受支持的非结构性标签和 EXIF 项。瓦片模式只生成副本。"
                  if tiled else "两种容器的文件头、IFD结构及图像块偏移需要重新生成；普通 TIFF 使用32位偏移，BigTIFF使用64位偏移。工具直接复制图像块，不重新采样、调色或压缩；不能恢复输入文件中已经缺失的标签。原位替换会保留原文件备份；异常文件记录在报告中，继续处理其他文件。"),
                 body,
             ),

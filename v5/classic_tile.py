@@ -40,10 +40,11 @@ def convert(source, target, progress=lambda s: None, nodata_zero=False, referenc
     if sample and (sample.type_id != 3 or sample.count not in (1, 3) or
                    any(x != 1 for x in struct.unpack(endian+'H'*sample.count, sample.raw))):
         raise ValueError('仅支持无符号整数样本')
-    if page.data_offsets_tag != 273 or 278 not in tags:
+    if page.data_offsets_tag != 273:
         raise ValueError('仅支持条带存储的输入')
     width, height = retile.number(tags[256], endian), retile.number(tags[257], endian)
-    rows_per_strip = retile.number(tags[278], endian)
+    # TIFF 6.0 defaults an absent RowsPerStrip to 2**32 - 1 (one strip).
+    rows_per_strip = retile.number(tags[278], endian) if 278 in tags else 0xFFFFFFFF
     if width <= 0 or height <= 0 or rows_per_strip <= 0 or width*3*256 > 128*1024*1024:
         raise ValueError('影像尺寸或条带参数超出安全范围')
     strip_count = (height + rows_per_strip - 1)//rows_per_strip

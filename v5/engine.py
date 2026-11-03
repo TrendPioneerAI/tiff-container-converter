@@ -15,7 +15,7 @@ import classic_tile
 from batch_pdf_report import generate_batch_pdf
 
 APP_NAME = "影像格式转换"
-APP_VERSION = "5.2.0"
+APP_VERSION = "5.3.0"
 SUPPORTED_EXTENSIONS = base.SUPPORTED_EXTENSIONS
 ConversionError = base.ConversionError
 
@@ -163,6 +163,23 @@ def _stat_signature(path):
     return s.st_size, s.st_mtime_ns
 
 
+def _path_key(path):
+    """Compare resolved destinations case-insensitively, as on Windows."""
+    return os.path.normcase(str(Path(path).resolve())).casefold()
+
+
+def _available_destination(outdir, stem, suffix, reserved, used, allow_existing=False):
+    """Select a distinct copy name, preserving every input and reference path."""
+    number = 1
+    while True:
+        extra = "" if number == 1 else f"-{number}"
+        candidate = outdir / f"{stem}{suffix}{extra}.tif"
+        key = _path_key(candidate)
+        if key not in reserved and key not in used and (allow_existing or not candidate.exists()):
+            return candidate
+        number += 1
+
+
 def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
                   replace_original=False, input_scope="多文件/文件夹选择", event_callback=None,
                   nodata_zero=False, reference=None):
@@ -183,6 +200,9 @@ def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
     wanted = "big" if direction == "to_classic" else "classic"
     suffix = {"to_big": "-bigtiff", "to_big_tiled": "-tiled-bigtiff", "to_classic": "-classic", "to_classic_tiled": "-tiled-classic"}[direction]
     results, used = [], set()
+    reserved = {_path_key(path) for path in inputs}
+    if reference:
+        reserved.add(_path_key(reference))
     started = time.strftime("%Y-%m-%d %H:%M:%S")
     def emit(*event):
         if event_callback:
@@ -198,15 +218,17 @@ def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
             original_stat = source.stat()
             before = (original_stat.st_size, original_stat.st_mtime_ns)
             dest = source if replace_original else outdir / f"{source.stem}{suffix}.tif"
-            if not replace_original and str(dest).lower() in used:
-                dest = outdir / f"{source.stem}{suffix}-{hashlib.sha256(str(source).encode()).hexdigest()[:10]}.tif"
-            used.add(str(dest).lower())
-            if not replace_original and dest.resolve() in inputs:
-                raise ConversionError("输出路径与批次输入重叠，已拒绝覆盖")
-            if reference and dest.resolve() == reference:
+            if not replace_original:
+                if overwrite:
+                    if _path_key(dest) in used:
+                        dest = _available_destination(outdir, source.stem, suffix, reserved, used, allow_existing=True)
+                    elif _path_key(dest) in reserved:
+                        raise ConversionError("输出路径与批次输入或参考文件重叠，已拒绝覆盖")
+                else:
+                    dest = _available_destination(outdir, source.stem, suffix, reserved, used)
+                used.add(_path_key(dest))
+            if reference and _path_key(dest) == _path_key(reference):
                 raise ConversionError("输出路径与参考文件重叠，已拒绝覆盖")
-            if not replace_original and dest.exists() and not overwrite:
-                raise ConversionError("输出文件已存在；请勾选覆盖副本或选择其他文件夹")
             temp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.pending")
             if direction == "to_big":
                 report = _reverse(source, temp, progress)
@@ -261,13 +283,22 @@ def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
             else:
                 if overwrite:
                     os.replace(temp, dest)
-                elif os.name == "nt":
-                    # Windows rename fails if another process created dest.
-                    os.rename(temp, dest)
                 else:
-                    # A hard-link creation fails atomically when dest exists.
-                    os.link(temp, dest)
-                    temp.unlink()
+                    while True:
+                        try:
+                            if os.name == "nt":
+                                # Windows rename is atomic and fails if dest exists.
+                                os.rename(temp, dest)
+                            else:
+                                # Link creation is atomic and fails if dest exists.
+                                os.link(temp, dest)
+                                temp.unlink()
+                            break
+                        except FileExistsError:
+                            # Another process won the name after selection; keep
+                            # the verified temporary output and retry a new name.
+                            dest = _available_destination(outdir, source.stem, suffix, reserved, used)
+                            used.add(_path_key(dest))
                 temp = None
             report["output"]["path"] = str(dest)
             report["output"]["size_bytes"] = dest.stat().st_size
@@ -297,6 +328,21 @@ def convert_batch(inputs, output_dir, direction="to_big", overwrite=False,
         "failed": sum(x["status"] != "PASS" for x in results), "results": results,
     }
     report_path = outdir / f"TIFF转换报告_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.pdf"
-    pdf_info = generate_batch_pdf(summary, report_path)
+    report_temp = report_path.with_name(f".{report_path.name}.{uuid.uuid4().hex}.pending")
+    summary["report_error"] = None
+    try:
+        pdf_info = generate_batch_pdf(summary, report_temp)
+        os.rename(report_temp, report_path)
+        pdf_info["path"] = str(report_path)
+    except Exception as exc:
+        summary["report_error"] = f"{type(exc).__name__}: {exc}"
+        report_path = None
+        pdf_info = None
+    finally:
+        if report_temp.exists():
+            try:
+                report_temp.unlink()
+            except OSError:
+                pass
     emit("batch_done", summary, report_path, pdf_info)
     return summary, report_path
