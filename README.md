@@ -8,6 +8,7 @@
 | v2 | 批量转换、文件夹扫描、离线许可证 |
 | v3 | 批量转换、原位替换选项、每批一份 PDF 报告 |
 | v4 | 普通 TIFF 与 BigTIFF 双向转换、批处理、PDF 报告，无需许可证 |
+| v5 | 在双向转换基础上，增加受限范围的256瓦片 BigTIFF 输出 |
 
 V1—V3 是原始历史版本的整理快照；V4 在其基础上增量开发。
 
@@ -22,6 +23,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe v2\bigtiff_to_classic.py
 .\.venv\Scripts\python.exe v3\bigtiff_to_classic.py
 .\.venv\Scripts\python.exe v4\app.py
+.\.venv\Scripts\python.exe v5\app.py
 ```
 
 其中 V2 和 V3 是原始授权版，需要可验证的许可证。源码没有包含以前的私钥和客户许可证，历史许可证若要继续使用，须由使用者自行安全保存；若从源码建立新签发体系，见 [授权重建](docs/license-rebuild.md)。这些材料不能依靠公开仓库恢复原来的私钥。
@@ -40,6 +42,8 @@ V2/V3 将最后的脚本名改为 `bigtiff_to_classic.py`，V4 改为 `app.py`�
 
 V4 的 Windows 安装程序在 GitHub Release 中下载。安装程序仅将程序文件放到选择的目录，不创建系统服务、开始菜单或卸载项；也可下载便携版 ZIP。
 
+V5 新增的瓦片模式仅支持部分无压缩 RGB 条带及部分 EXIF；逐像素回读验证，不替换原文件。详细适用范围见 [V5 使用说明](v5/使用说明.md)。
+
 在仓库根目录重建 V4 安装程序（依赖见上）：
 
 ```powershell
@@ -50,6 +54,8 @@ $env:TIFF_INSTALLER_PAYLOAD = (Resolve-Path payload.zip).Path
 ```
 
 构建脚本排除影像文件；生成的 `payload.zip` 和 `setup-dist` 不应提交到源码仓库。
+
+V5 构建时以 `v5\app.py`、`v5\build_payload.py` 和 `v5\installer.spec` 替换上述版本路径，程序名改为 `TIFF_Converter_V5`。
 
 ## 测试与边界
 

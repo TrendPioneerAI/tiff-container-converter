@@ -7,6 +7,7 @@ setup-dist/
 payload.zip
 *.spec
 !v4/installer.spec
+!v5/installer.spec
 *.lic
 *.pem
 *.key
